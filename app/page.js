@@ -26,16 +26,42 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false); // Loading state for sign in
   const [token, setToken] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [showCard, setShowCard] = useState(false); // Controls the pop-up (login card visibility)
   const [loginError, setLoginError] = useState('');
   const [stats, setStats] = useState({
     total_users: 0, total_messages: 0, total_matches: 0,
     total_admins: 0, completed_users: 0,
     inbound_messages: 0, outbound_messages: 0
   });
+
+  const login = async () => {
+    setIsLoggingIn(true); // Start loading
+    try {
+      const response = await fetch(`${ADMIN_API}/admin/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `username=${username}&password=${password}`
+      });
+      const data = await response.json();
+      if (data.access_token) {
+        setToken(data.access_token);
+        setIsLoggedIn(true);
+        setLoginError('');
+        fetchAll(data.access_token, 1, 1, 1, '', '', '');
+      } else {
+        setLoginError('Invalid username or password');
+      }
+    } catch {
+      setLoginError('Could not connect to server');
+    } finally {
+      setIsLoggingIn(false); // Stop loading
+    }
+  };
 
   // Filter states
   const [userSearch, setUserSearch] = useState('');
@@ -49,26 +75,6 @@ export default function Home() {
   const [matchStatus, setMatchStatus] = useState('');
   const [matchDateRange, setMatchDateRange] = useState('');
 
-  const login = async () => {
-    try {
-      const res = await fetch(`${ADMIN_API}/admin/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `username=${username}&password=${password}`
-      });
-      const data = await res.json();
-      if (data.access_token) {
-        setToken(data.access_token);
-        setIsLoggedIn(true);
-        setLoginError('');
-        fetchAll(data.access_token, {});
-      } else {
-        setLoginError('Invalid username or password');
-      }
-    } catch {
-      setLoginError('Could not connect to server');
-    }
-  };
 
   const fetchAll = async (tk, overrides = {}) => {
     try {
@@ -219,44 +225,87 @@ export default function Home() {
   );
 
   // LOGIN PAGE
-  if (!isLoggedIn) {
+ if (!isLoggedIn) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-900 to-indigo-900 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
-          <div className="bg-blue-700 px-8 py-10 text-center">
-            <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
-              <span className="text-blue-700 text-3xl font-black">P</span>
+      <div 
+        className="min-h-screen flex items-center justify-center bg-no-repeat bg-fixed relative font-sans"
+        style={{ 
+          backgroundImage: `url('https://i.pinimg.com/1200x/77/96/14/779614fea0c40a0700e65929b61c212e.jpg')`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'cover% cover%'
+        }}
+      >
+        <div className="absolute inset-0 bg-black/40"></div>
+
+        {!showCard ? (
+          <div className="relative z-10 text-center animate-in fade-in zoom-in duration-500">
+            <div className="w-24 h-24 bg-white rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-2xl">
+              <span className="text-blue-700 text-4xl font-black">P</span>
             </div>
-            <h1 className="text-2xl font-black text-white">Penzi Admin</h1>
-            <p className="text-blue-200 text-sm mt-1">Dating Service Dashboard</p>
-          </div>
-          <div className="px-8 py-8">
-            {loginError && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-5 text-sm font-medium">
-                {loginError}
-              </div>
-            )}
-            <div className="mb-5">
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Username</label>
-              <input type="text" value={username} onChange={e => setUsername(e.target.value)}
-                placeholder="Enter your username"
-                className="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm text-gray-900 focus:outline-none focus:border-blue-500 bg-gray-50" />
-            </div>
-            <div className="mb-7">
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Password</label>
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)}
-                placeholder="Enter your password" onKeyDown={e => e.key === 'Enter' && login()}
-                className="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm text-gray-900 focus:outline-none focus:border-blue-500 bg-gray-50" />
-            </div>
-            <button onClick={login}
-              className="w-full py-3.5 bg-blue-700 text-white font-bold rounded-xl text-sm hover:bg-blue-800 transition-all shadow-lg shadow-blue-200">
-              Sign In to Dashboard
+            <h1 className="text-4xl font-black text-white mb-8 drop-shadow-lg">Penzi Dashboard</h1>
+            <button 
+              onClick={() => setShowCard(true)}
+              className="px-12 py-4 bg-blue-700 text-white font-bold rounded-full text-lg hover:bg-blue-800 transition-all shadow-2xl hover:scale-105 active:scale-95"
+            >
+              Sign In to Access
             </button>
           </div>
-        </div>
+        ) : (
+          <div className="relative z-20 w-full max-w-md p-6 animate-in fade-in slide-in-from-bottom-10 duration-300">
+            <div className="bg-white rounded-3xl shadow-2xl overflow-hidden border border-gray-100">
+              <div className="bg-blue-700 px-8 py-8 text-center relative">
+                <button 
+                  onClick={() => setShowCard(false)}
+                  className="absolute top-4 right-4 text-blue-200 hover:text-white text-xl"
+                >
+                  ✕
+                </button>
+                <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <span className="text-white text-2xl font-black">P</span>
+                </div>
+                <h1 className="text-xl font-black text-white">Administrator Login</h1>
+              </div>
+              
+              <div className="px-8 py-8">
+                {loginError && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-5 text-sm font-medium">
+                    {loginError}
+                  </div>
+                )}
+                <div className="mb-5">
+                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Username</label>
+                  <input type="text" value={username} onChange={e => setUsername(e.target.value)}
+                    placeholder="Enter your username"
+                    className="w-full px-4 py-3 border-2 border-gray-50 rounded-xl text-sm focus:outline-none focus:border-blue-500 bg-gray-50 text-gray-900" />
+                </div>
+                <div className="mb-8">
+                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Password</label>
+                  <input type="password" value={password} onChange={e => setPassword(e.target.value)}
+                    placeholder="Enter your password" onKeyDown={e => e.key === 'Enter' && login()}
+                    className="w-full px-4 py-3 border-2 border-gray-50 rounded-xl text-sm focus:outline-none focus:border-blue-500 bg-gray-50 text-gray-900" />
+                </div>
+                <button onClick={login}
+                  disabled={isLoggingIn}
+                  className={`w-full py-4 text-white font-bold rounded-xl text-sm transition-all shadow-lg flex items-center justify-center gap-2 ${
+                    isLoggingIn ? 'bg-blue-500 cursor-not-allowed' : 'bg-blue-700 hover:bg-blue-800 shadow-blue-200'
+                  }`}>
+                  {isLoggingIn ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      Signing in...
+                    </>
+                  ) : (
+                    'Secure Sign In'
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
+
 
   // LOADING
   if (loading) {
@@ -297,7 +346,7 @@ export default function Home() {
           {navItems.map(item => (
             <button key={item.key} onClick={() => setActiveTab(item.key)}
               className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-semibold transition-all ${
-                activeTab === item.key ? 'bg-white text-blue-900 shadow-lg' : 'text-blue-200 hover:bg-blue-800 hover:text-white'
+                activeTab === item.key ? 'bg-white text-slate-950 shadow-lg' : 'text-blue-200 hover:bg-blue-800 hover:text-white'
               }`}>
               <span className="flex items-center gap-3">
                 <span className="text-base">{item.icon}</span>
@@ -305,15 +354,15 @@ export default function Home() {
               </span>
               {item.count !== undefined && (
                 <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${
-                  activeTab === item.key ? 'bg-blue-100 text-blue-800' : 'bg-blue-800 text-blue-200'
+                  activeTab === item.key ? 'bg-indigo-50 text-indigo-700' : 'bg-indigo-800 text-indigo-100'
                 }`}>{item.count}</span>
               )}
             </button>
           ))}
         </nav>
-        <div className="px-4 py-5 border-t border-blue-800 space-y-2">
+        <div className="px-4 py-5 border-t border-indigo-700 space-y-2">
           <button onClick={handleRefresh}
-            className="w-full py-2.5 bg-blue-800 text-blue-200 rounded-xl text-xs font-bold hover:bg-blue-700 hover:text-white transition-all">
+            className="w-full py-2.5 bg-indigo-700 text-indigo-200 rounded-xl text-xs font-bold hover:bg-indigo-600 hover:text-white transition-all">
             {refreshing ? '↻ Refreshing...' : '↻ Refresh Data'}
           </button>
           <button onClick={() => { setIsLoggedIn(false); setToken(''); setShowCard(false); }}
@@ -565,8 +614,11 @@ export default function Home() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-purple-700 text-white">
-                        {['Requester', 'Phone', 'Age', 'Town', 'Matched With', 'Phone', 'Age', 'Town', 'Status', 'Date'].map(h => (
-                          <th key={h} className="px-4 py-4 text-left font-semibold text-xs uppercase tracking-wider whitespace-nowrap">{h}</th>
+                        {['Requester', 'Phone', 'Age', 'Town', 'Matched With', 'Phone', 'Age', 'Town', 'Status', 'Date'].map((h, index) => (
+                          /* Using h + index ensures the first "Phone" is "Phone-1" and the second is "Phone-5" */
+                          <th key={`${h}-${index}`} className="px-4 py-4 text-left font-semibold text-xs uppercase tracking-wider whitespace-nowrap">
+                            {h}
+                          </th>
                         ))}
                       </tr>
                     </thead>

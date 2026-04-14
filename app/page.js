@@ -4,10 +4,19 @@ import { useState } from 'react';
 
 const ADMIN_API = 'http://127.0.0.1:8000';
 
+const DATE_RANGES = [
+  { key: '', label: 'All Time' },
+  { key: 'today', label: 'Today' },
+  { key: 'this_week', label: 'This Week' },
+  { key: 'this_month', label: 'This Month' },
+  { key: 'last_month', label: 'Last Month' },
+];
+
 export default function Home() {
   const [users, setUsers] = useState([]);
   const [messages, setMessages] = useState([]);
   const [matches, setMatches] = useState([]);
+  const [counties, setCounties] = useState([]);
   const [usersMeta, setUsersMeta] = useState({ total: 0, total_pages: 1 });
   const [messagesMeta, setMessagesMeta] = useState({ total: 0, total_pages: 1 });
   const [matchesMeta, setMatchesMeta] = useState({ total: 0, total_pages: 1 });
@@ -17,56 +26,81 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [isLoggingIn, setIsLoggingIn] = useState(false); // NEW: Loading state for sign in
   const [token, setToken] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [showCard, setShowCard] = useState(false); // Controls the pop-up
   const [loginError, setLoginError] = useState('');
-  const [userSearch, setUserSearch] = useState('');
-  const [messageFilter, setMessageFilter] = useState('');
-  const [matchFilter, setMatchFilter] = useState('');
   const [stats, setStats] = useState({
     total_users: 0, total_messages: 0, total_matches: 0,
-    total_admins: 0, completed_users: 0, inbound_messages: 0, outbound_messages: 0
+    total_admins: 0, completed_users: 0,
+    inbound_messages: 0, outbound_messages: 0
   });
 
+  // Filter states
+  const [userSearch, setUserSearch] = useState('');
+  const [userCounty, setUserCounty] = useState('');
+  const [userGender, setUserGender] = useState('');
+  const [userStage, setUserStage] = useState('');
+  const [userDateRange, setUserDateRange] = useState('');
+  const [messageSearch, setMessageSearch] = useState('');
+  const [messageDirection, setMessageDirection] = useState('');
+  const [messageDateRange, setMessageDateRange] = useState('');
+  const [matchStatus, setMatchStatus] = useState('');
+  const [matchDateRange, setMatchDateRange] = useState('');
+
   const login = async () => {
-    setIsLoggingIn(true); // Start loading
     try {
-      const response = await fetch(`${ADMIN_API}/admin/login`, {
+      const res = await fetch(`${ADMIN_API}/admin/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: `username=${username}&password=${password}`
       });
-      const data = await response.json();
+      const data = await res.json();
       if (data.access_token) {
         setToken(data.access_token);
         setIsLoggedIn(true);
         setLoginError('');
-        fetchAll(data.access_token, 1, 1, 1, '', '', '');
+        fetchAll(data.access_token, {});
       } else {
         setLoginError('Invalid username or password');
       }
     } catch {
       setLoginError('Could not connect to server');
-    } finally {
-      setIsLoggingIn(false); // Stop loading
     }
   };
 
-  const fetchAll = async (accessToken, uPage, mPage, matchPage, uSearch, mDir, matchStatus) => {
+  const fetchAll = async (tk, overrides = {}) => {
     try {
-      const headers = { Authorization: `Bearer ${accessToken}` };
-      const uSearch_ = uSearch ? `&search=${uSearch}` : '';
-      const mDir_ = mDir ? `&direction=${mDir}` : '';
-      const matchStatus_ = matchStatus ? `&status=${matchStatus}` : '';
+      const headers = { Authorization: `Bearer ${tk}` };
+      const f = { ...getCurrentFilters(), ...overrides };
+
+      const uParams = new URLSearchParams({
+        page: f.uPage, page_size: 10,
+        ...(f.uSearch && { search: f.uSearch }),
+        ...(f.uCounty && { county: f.uCounty }),
+        ...(f.uGender && { gender: f.uGender }),
+        ...(f.uStage && { registration_stage: f.uStage }),
+        ...(f.uDateRange && { date_range: f.uDateRange }),
+      });
+
+      const mParams = new URLSearchParams({
+        page: f.mPage, page_size: 10,
+        ...(f.mSearch && { search: f.mSearch }),
+        ...(f.mDirection && { direction: f.mDirection }),
+        ...(f.mDateRange && { date_range: f.mDateRange }),
+      });
+
+      const matchParams = new URLSearchParams({
+        page: f.matchPage, page_size: 10,
+        ...(f.matchStatus && { status: f.matchStatus }),
+        ...(f.matchDateRange && { date_range: f.matchDateRange }),
+      });
 
       const [uRes, mRes, matchRes, statsRes] = await Promise.all([
-        fetch(`${ADMIN_API}/admin/users?page=${uPage}&page_size=10${uSearch_}`, { headers }),
-        fetch(`${ADMIN_API}/admin/messages?page=${mPage}&page_size=10${mDir_}`, { headers }),
-        fetch(`${ADMIN_API}/admin/matches?page=${matchPage}&page_size=10${matchStatus_}`, { headers }),
+        fetch(`${ADMIN_API}/admin/users?${uParams}`, { headers }),
+        fetch(`${ADMIN_API}/admin/messages?${mParams}`, { headers }),
+        fetch(`${ADMIN_API}/admin/matches?${matchParams}`, { headers }),
         fetch(`${ADMIN_API}/admin/stats`, { headers }),
       ]);
 
@@ -77,6 +111,7 @@ export default function Home() {
 
       setUsers(uData.data || []);
       setUsersMeta({ total: uData.total, total_pages: uData.total_pages });
+      setCounties(uData.counties || []);
       setMessages(mData.data || []);
       setMessagesMeta({ total: mData.total, total_pages: mData.total_pages });
       setMatches(matchData.data || []);
@@ -91,42 +126,35 @@ export default function Home() {
     }
   };
 
+  const getCurrentFilters = () => ({
+    uPage: usersPage, uSearch: userSearch, uCounty: userCounty,
+    uGender: userGender, uStage: userStage, uDateRange: userDateRange,
+    mPage: messagesPage, mSearch: messageSearch,
+    mDirection: messageDirection, mDateRange: messageDateRange,
+    matchPage: matchesPage, matchStatus, matchDateRange,
+  });
+
+  const applyUserFilter = (overrides) => {
+    const newPage = 1;
+    setUsersPage(newPage);
+    fetchAll(token, { ...getCurrentFilters(), uPage: newPage, ...overrides });
+  };
+
+  const applyMessageFilter = (overrides) => {
+    const newPage = 1;
+    setMessagesPage(newPage);
+    fetchAll(token, { ...getCurrentFilters(), mPage: newPage, ...overrides });
+  };
+
+  const applyMatchFilter = (overrides) => {
+    const newPage = 1;
+    setMatchesPage(newPage);
+    fetchAll(token, { ...getCurrentFilters(), matchPage: newPage, ...overrides });
+  };
+
   const handleRefresh = () => {
     setRefreshing(true);
-    fetchAll(token, usersPage, messagesPage, matchesPage, userSearch, messageFilter, matchFilter);
-  };
-
-  const handleUserSearch = (val) => {
-    setUserSearch(val);
-    setUsersPage(1);
-    fetchAll(token, 1, messagesPage, matchesPage, val, messageFilter, matchFilter);
-  };
-
-  const handleMessageFilter = (val) => {
-    setMessageFilter(val);
-    setMessagesPage(1);
-    fetchAll(token, usersPage, 1, matchesPage, userSearch, val, matchFilter);
-  };
-
-  const handleMatchFilter = (val) => {
-    setMatchFilter(val);
-    setMatchesPage(1);
-    fetchAll(token, usersPage, messagesPage, 1, userSearch, messageFilter, val);
-  };
-
-  const goUsersPage = (pg) => {
-    setUsersPage(pg);
-    fetchAll(token, pg, messagesPage, matchesPage, userSearch, messageFilter, matchFilter);
-  };
-
-  const goMessagesPage = (pg) => {
-    setMessagesPage(pg);
-    fetchAll(token, usersPage, pg, matchesPage, userSearch, messageFilter, matchFilter);
-  };
-
-  const goMatchesPage = (pg) => {
-    setMatchesPage(pg);
-    fetchAll(token, usersPage, messagesPage, pg, userSearch, messageFilter, matchFilter);
+    fetchAll(token);
   };
 
   const Pagination = ({ page, totalPages, onPage }) => {
@@ -158,87 +186,79 @@ export default function Home() {
     );
   };
 
+  const FilterBar = ({ children }) => (
+    <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-5">
+      <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Filters</p>
+      <div className="flex flex-wrap gap-3">{children}</div>
+    </div>
+  );
+
+  const FilterSelect = ({ value, onChange, options, placeholder }) => (
+    <select value={value} onChange={e => onChange(e.target.value)}
+      className="px-3 py-2 border-2 border-gray-100 rounded-xl text-sm text-gray-700 focus:outline-none focus:border-blue-500 bg-gray-50 cursor-pointer">
+      <option value="">{placeholder}</option>
+      {options.map(opt => (
+        <option key={opt.key ?? opt} value={opt.key ?? opt}>
+          {opt.label ?? opt}
+        </option>
+      ))}
+    </select>
+  );
+
+  const FilterInput = ({ value, onChange, placeholder }) => (
+    <input type="text" value={value} onChange={e => onChange(e.target.value)}
+      placeholder={placeholder}
+      className="px-3 py-2 border-2 border-gray-100 rounded-xl text-sm text-gray-700 focus:outline-none focus:border-blue-500 bg-gray-50 w-56" />
+  );
+
+  const ClearBtn = ({ onClick }) => (
+    <button onClick={onClick}
+      className="px-3 py-2 text-xs font-bold text-red-500 border border-red-200 rounded-xl hover:bg-red-50 transition-all">
+      Clear Filters
+    </button>
+  );
+
+  // LOGIN PAGE
   if (!isLoggedIn) {
     return (
-      <div 
-        className="min-h-screen flex items-center justify-center bg-no-repeat bg-fixed relative font-sans"
-        style={{ 
-          backgroundImage: `url('https://i.pinimg.com/1200x/77/96/14/779614fea0c40a0700e65929b61c212e.jpg')`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'cover% cover%'
-        }}
-      >
-        <div className="absolute inset-0 bg-black/40"></div>
-
-        {!showCard ? (
-          <div className="relative z-10 text-center animate-in fade-in zoom-in duration-500">
-            <div className="w-24 h-24 bg-white rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-2xl">
-              <span className="text-blue-700 text-4xl font-black">P</span>
+      <div className="min-h-screen bg-gradient-to-br from-blue-900 to-indigo-900 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
+          <div className="bg-blue-700 px-8 py-10 text-center">
+            <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
+              <span className="text-blue-700 text-3xl font-black">P</span>
             </div>
-            <h1 className="text-4xl font-black text-white mb-8 drop-shadow-lg">Penzi Dashboard</h1>
-            <button 
-              onClick={() => setShowCard(true)}
-              className="px-12 py-4 bg-blue-700 text-white font-bold rounded-full text-lg hover:bg-blue-800 transition-all shadow-2xl hover:scale-105 active:scale-95"
-            >
-              Sign In to Access
+            <h1 className="text-2xl font-black text-white">Penzi Admin</h1>
+            <p className="text-blue-200 text-sm mt-1">Dating Service Dashboard</p>
+          </div>
+          <div className="px-8 py-8">
+            {loginError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-5 text-sm font-medium">
+                {loginError}
+              </div>
+            )}
+            <div className="mb-5">
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Username</label>
+              <input type="text" value={username} onChange={e => setUsername(e.target.value)}
+                placeholder="Enter your username"
+                className="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm text-gray-900 focus:outline-none focus:border-blue-500 bg-gray-50" />
+            </div>
+            <div className="mb-7">
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Password</label>
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)}
+                placeholder="Enter your password" onKeyDown={e => e.key === 'Enter' && login()}
+                className="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm text-gray-900 focus:outline-none focus:border-blue-500 bg-gray-50" />
+            </div>
+            <button onClick={login}
+              className="w-full py-3.5 bg-blue-700 text-white font-bold rounded-xl text-sm hover:bg-blue-800 transition-all shadow-lg shadow-blue-200">
+              Sign In to Dashboard
             </button>
           </div>
-        ) : (
-          <div className="relative z-20 w-full max-w-md p-6 animate-in fade-in slide-in-from-bottom-10 duration-300">
-            <div className="bg-white rounded-3xl shadow-2xl overflow-hidden border border-gray-100">
-              <div className="bg-blue-700 px-8 py-8 text-center relative">
-                <button 
-                  onClick={() => setShowCard(false)}
-                  className="absolute top-4 right-4 text-blue-200 hover:text-white text-xl"
-                >
-                  ✕
-                </button>
-                <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-3">
-                  <span className="text-white text-2xl font-black">P</span>
-                </div>
-                <h1 className="text-xl font-black text-white">Administrator Login</h1>
-              </div>
-              
-              <div className="px-8 py-8">
-                {loginError && (
-                  <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-5 text-sm font-medium">
-                    {loginError}
-                  </div>
-                )}
-                <div className="mb-5">
-                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Username</label>
-                  <input type="text" value={username} onChange={e => setUsername(e.target.value)}
-                    placeholder="Enter your username"
-                    className="w-full px-4 py-3 border-2 border-gray-50 rounded-xl text-sm focus:outline-none focus:border-blue-500 bg-gray-50 text-gray-900" />
-                </div>
-                <div className="mb-8">
-                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Password</label>
-                  <input type="password" value={password} onChange={e => setPassword(e.target.value)}
-                    placeholder="Enter your password" onKeyDown={e => e.key === 'Enter' && login()}
-                    className="w-full px-4 py-3 border-2 border-gray-50 rounded-xl text-sm focus:outline-none focus:border-blue-500 bg-gray-50 text-gray-900" />
-                </div>
-                <button onClick={login}
-                  disabled={isLoggingIn}
-                  className={`w-full py-4 text-white font-bold rounded-xl text-sm transition-all shadow-lg flex items-center justify-center gap-2 ${
-                    isLoggingIn ? 'bg-blue-500 cursor-not-allowed' : 'bg-blue-700 hover:bg-blue-800 shadow-blue-200'
-                  }`}>
-                  {isLoggingIn ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      Signing in...
-                    </>
-                  ) : (
-                    'Secure Sign In'
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        </div>
       </div>
     );
   }
 
+  // LOADING
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-100 flex items-center justify-center">
@@ -259,6 +279,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gray-100 flex">
+
       {/* SIDEBAR */}
       <aside className="w-64 bg-zinc-900 min-h-screen flex flex-col shadow-2xl">
         <div className="px-6 py-7 border-b border-indigo-700">
@@ -276,7 +297,7 @@ export default function Home() {
           {navItems.map(item => (
             <button key={item.key} onClick={() => setActiveTab(item.key)}
               className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-semibold transition-all ${
-                activeTab === item.key ? 'bg-white text-slate-950 shadow-lg' : 'text-blue-200 hover:bg-blue-800 hover:text-white'
+                activeTab === item.key ? 'bg-white text-blue-900 shadow-lg' : 'text-blue-200 hover:bg-blue-800 hover:text-white'
               }`}>
               <span className="flex items-center gap-3">
                 <span className="text-base">{item.icon}</span>
@@ -284,19 +305,18 @@ export default function Home() {
               </span>
               {item.count !== undefined && (
                 <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${
-                  activeTab === item.key ? 'bg-indigo-50 text-indigo-700' : 'bg-indigo-700 text-indigo-100'
+                  activeTab === item.key ? 'bg-blue-100 text-blue-800' : 'bg-blue-800 text-blue-200'
                 }`}>{item.count}</span>
               )}
             </button>
           ))}
         </nav>
-        <div className="px-4 py-5 border-t border-indigo-700 space-y-2">
+        <div className="px-4 py-5 border-t border-blue-800 space-y-2">
           <button onClick={handleRefresh}
-            className="w-full py-2.5 bg-indigo-700 text-indigo-100 rounded-xl text-xs font-bold hover:bg-indigo-600 hover:text-white transition-all">
+            className="w-full py-2.5 bg-blue-800 text-blue-200 rounded-xl text-xs font-bold hover:bg-blue-700 hover:text-white transition-all">
             {refreshing ? '↻ Refreshing...' : '↻ Refresh Data'}
           </button>
-          <button
-           onClick={() => { setIsLoggedIn(false); setToken(''); setShowCard(false); }}
+          <button onClick={() => { setIsLoggedIn(false); setToken(''); setShowCard(false); }}
             className="w-full py-2.5 bg-transparent border border-red-500/208 text-red-400 rounded-xl text-xs font-bold hover:bg-red-600 hover:text-white hover:border-red-600 transition-all">
             Logout
           </button>
@@ -314,13 +334,15 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-blue-700 rounded-full flex items-center justify-center">
-              <span className="text-white text-xs font-bold">{username?.toUpperCase()}</span>
+              <span className="text-white text-xs font-bold">{username[0]?.toUpperCase()}</span>
             </div>
             <span className="text-sm font-semibold text-gray-700">{username}</span>
           </div>
         </header>
 
         <div className="flex-1 overflow-auto p-8">
+
+          {/* DASHBOARD TAB */}
           {activeTab === 'dashboard' && (
             <div>
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
@@ -328,7 +350,7 @@ export default function Home() {
                   { label: 'Total Users', value: stats.total_users, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-200' },
                   { label: 'Total Messages', value: stats.total_messages, color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-200' },
                   { label: 'Total Matches', value: stats.total_matches, color: 'text-purple-600', bg: 'bg-purple-50', border: 'border-purple-200' },
-                  { label: 'Accepted Matches', value: stats.completed_users, color: 'text-orange-600', bg: 'bg-orange-50', border: 'border-orange-200' },
+                  { label: 'Completed Registrations', value: stats.completed_users, color: 'text-orange-600', bg: 'bg-orange-50', border: 'border-orange-200' },
                 ].map((stat, i) => (
                   <div key={i} className={`${stat.bg} border ${stat.border} rounded-2xl p-6 shadow-sm`}>
                     <p className={`text-4xl font-black ${stat.color}`}>{stat.value}</p>
@@ -379,34 +401,60 @@ export default function Home() {
             </div>
           )}
 
+          {/* USERS TAB */}
           {activeTab === 'users' && (
             <div>
-              <div className="flex items-center justify-between mb-5">
-                <p className="text-sm text-gray-500">{usersMeta.total} total users</p>
-                <input type="text" value={userSearch}
-                  onChange={e => handleUserSearch(e.target.value)}
-                  placeholder="Search by name or phone..."
-                  className="px-4 py-2.5 border-2 border-gray-100 rounded-xl text-sm text-gray-900 focus:outline-none focus:border-blue-500 bg-white w-72 shadow-sm" />
+              <FilterBar>
+                <FilterInput value={userSearch} placeholder="Search name or phone..."
+                  onChange={val => { setUserSearch(val); applyUserFilter({ uSearch: val }); }} />
+                <FilterSelect value={userCounty} placeholder="All Counties"
+                  options={counties}
+                  onChange={val => { setUserCounty(val); applyUserFilter({ uCounty: val }); }} />
+                <FilterSelect value={userGender} placeholder="All Genders"
+                  options={[{ key: 'Male', label: 'Male' }, { key: 'Female', label: 'Female' }]}
+                  onChange={val => { setUserGender(val); applyUserFilter({ uGender: val }); }} />
+                <FilterSelect value={userStage} placeholder="All Stages"
+                  options={[{ key: 'complete', label: 'Fully Registered' }, { key: 'partial', label: 'Partially Registered' }]}
+                  onChange={val => { setUserStage(val); applyUserFilter({ uStage: val }); }} />
+                <FilterSelect value={userDateRange} placeholder="All Time"
+                  options={DATE_RANGES.filter(d => d.key)}
+                  onChange={val => { setUserDateRange(val); applyUserFilter({ uDateRange: val }); }} />
+                {(userSearch || userCounty || userGender || userStage || userDateRange) && (
+                  <ClearBtn onClick={() => {
+                    setUserSearch(''); setUserCounty(''); setUserGender('');
+                    setUserStage(''); setUserDateRange('');
+                    applyUserFilter({ uSearch: '', uCounty: '', uGender: '', uStage: '', uDateRange: '' });
+                  }} />
+                )}
+              </FilterBar>
+
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm text-gray-500">{usersMeta.total} users found</p>
               </div>
+
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-blue-700 text-white">
-                        {['Name', 'Phone', 'Age', 'Gender', 'County', 'Town', 'Education', 'Profession', 'Marital Status', 'Stage'].map(h => (
+                        {['Name', 'Phone', 'Age', 'Gender', 'County', 'Town', 'Education', 'Profession', 'Marital Status', 'Stage', 'Registered'].map(h => (
                           <th key={h} className="px-4 py-4 text-left font-semibold text-xs uppercase tracking-wider whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
                       {users.length === 0 ? (
-                        <tr><td colSpan="10" className="px-4 py-12 text-center text-gray-400 font-medium">No users found</td></tr>
+                        <tr><td colSpan="11" className="px-4 py-12 text-center text-gray-400 font-medium">No users found</td></tr>
                       ) : users.map((user, index) => (
                         <tr key={user.id} className={`${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-blue-50 transition-colors`}>
                           <td className="px-4 py-4 font-bold text-gray-900 whitespace-nowrap">{user.name}</td>
                           <td className="px-4 py-4 font-semibold text-gray-700 whitespace-nowrap">{user.phone_number}</td>
                           <td className="px-4 py-4 font-semibold text-gray-700">{user.age}</td>
-                          <td className="px-4 py-4 font-semibold text-gray-700">{user.gender}</td>
+                          <td className="px-4 py-4">
+                            <span className={`px-2 py-1 rounded-full text-xs font-bold ${user.gender?.toLowerCase().includes('female') ? 'bg-pink-100 text-pink-800' : 'bg-blue-100 text-blue-800'}`}>
+                              {user.gender}
+                            </span>
+                          </td>
                           <td className="px-4 py-4 font-semibold text-gray-700 whitespace-nowrap">{user.county}</td>
                           <td className="px-4 py-4 font-semibold text-gray-700 whitespace-nowrap">{user.town}</td>
                           <td className="px-4 py-4 font-semibold text-gray-700">{user.education || '—'}</td>
@@ -415,35 +463,46 @@ export default function Home() {
                           <td className="px-4 py-4">
                             <span className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap ${
                               user.registration_stage === 'complete' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
-                            }`}>{user.registration_stage}</span>
+                            }`}>{user.registration_stage === 'complete' ? 'Complete' : 'Partial'}</span>
+                          </td>
+                          <td className="px-4 py-4 text-gray-400 text-xs whitespace-nowrap">
+                            {new Date(user.created_at).toLocaleDateString()}
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-                <Pagination page={usersPage} totalPages={usersMeta.total_pages} onPage={goUsersPage} />
+                <Pagination page={usersPage} totalPages={usersMeta.total_pages}
+                  onPage={pg => { setUsersPage(pg); fetchAll(token, { ...getCurrentFilters(), uPage: pg }); }} />
               </div>
             </div>
           )}
 
+          {/* MESSAGES TAB */}
           {activeTab === 'messages' && (
             <div>
-              <div className="flex items-center justify-between mb-5">
-                <p className="text-sm text-gray-500">{messagesMeta.total} total messages</p>
-                <div className="flex gap-2">
-                  {[
-                    { key: '', label: 'All' },
-                    { key: 'inbound', label: 'Inbound' },
-                    { key: 'outbound', label: 'Outbound' },
-                  ].map(f => (
-                    <button key={f.key} onClick={() => handleMessageFilter(f.key)}
-                      className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                        messageFilter === f.key ? 'bg-green-600 text-white shadow-md' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
-                      }`}>{f.label}</button>
-                  ))}
-                </div>
+              <FilterBar>
+                <FilterInput value={messageSearch} placeholder="Search sender, receiver or message..."
+                  onChange={val => { setMessageSearch(val); applyMessageFilter({ mSearch: val }); }} />
+                <FilterSelect value={messageDirection} placeholder="All Directions"
+                  options={[{ key: 'inbound', label: 'Inbound' }, { key: 'outbound', label: 'Outbound' }]}
+                  onChange={val => { setMessageDirection(val); applyMessageFilter({ mDirection: val }); }} />
+                <FilterSelect value={messageDateRange} placeholder="All Time"
+                  options={DATE_RANGES.filter(d => d.key)}
+                  onChange={val => { setMessageDateRange(val); applyMessageFilter({ mDateRange: val }); }} />
+                {(messageSearch || messageDirection || messageDateRange) && (
+                  <ClearBtn onClick={() => {
+                    setMessageSearch(''); setMessageDirection(''); setMessageDateRange('');
+                    applyMessageFilter({ mSearch: '', mDirection: '', mDateRange: '' });
+                  }} />
+                )}
+              </FilterBar>
+
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm text-gray-500">{messagesMeta.total} messages found</p>
               </div>
+
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -463,9 +522,9 @@ export default function Home() {
                           <td className="px-4 py-4 font-semibold text-gray-700 whitespace-nowrap">{msg.receiver}</td>
                           <td className="px-4 py-4 font-semibold text-gray-700" style={{ maxWidth: '320px', whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: '1.5' }}>{msg.message}</td>
                           <td className="px-4 py-4">
-                            <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                              msg.direction === 'inbound' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'
-                            }`}>{msg.direction}</span>
+                            <span className={`px-3 py-1 rounded-full text-xs font-bold ${msg.direction === 'inbound' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'}`}>
+                              {msg.direction}
+                            </span>
                           </td>
                           <td className="px-4 py-4 text-gray-400 text-xs whitespace-nowrap">{new Date(msg.created_at).toLocaleString()}</td>
                         </tr>
@@ -473,34 +532,40 @@ export default function Home() {
                     </tbody>
                   </table>
                 </div>
-                <Pagination page={messagesPage} totalPages={messagesMeta.total_pages} onPage={goMessagesPage} />
+                <Pagination page={messagesPage} totalPages={messagesMeta.total_pages}
+                  onPage={pg => { setMessagesPage(pg); fetchAll(token, { ...getCurrentFilters(), mPage: pg }); }} />
               </div>
             </div>
           )}
 
+          {/* MATCHES TAB */}
           {activeTab === 'matches' && (
             <div>
-              <div className="flex items-center justify-between mb-5">
-                <p className="text-sm text-gray-500">{matchesMeta.total} total matches</p>
-                <div className="flex gap-2">
-                  {[
-                    { key: '', label: 'All' },
-                    { key: 'pending', label: 'Pending' },
-                    { key: 'accepted', label: 'Accepted' },
-                  ].map(f => (
-                    <button key={f.key} onClick={() => handleMatchFilter(f.key)}
-                      className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                        matchFilter === f.key ? 'bg-purple-600 text-white shadow-md' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
-                      }`}>{f.label}</button>
-                  ))}
-                </div>
+              <FilterBar>
+                <FilterSelect value={matchStatus} placeholder="All Statuses"
+                  options={[{ key: 'pending', label: 'Pending' }, { key: 'accepted', label: 'Accepted' }]}
+                  onChange={val => { setMatchStatus(val); applyMatchFilter({ matchStatus: val }); }} />
+                <FilterSelect value={matchDateRange} placeholder="All Time"
+                  options={DATE_RANGES.filter(d => d.key)}
+                  onChange={val => { setMatchDateRange(val); applyMatchFilter({ matchDateRange: val }); }} />
+                {(matchStatus || matchDateRange) && (
+                  <ClearBtn onClick={() => {
+                    setMatchStatus(''); setMatchDateRange('');
+                    applyMatchFilter({ matchStatus: '', matchDateRange: '' });
+                  }} />
+                )}
+              </FilterBar>
+
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm text-gray-500">{matchesMeta.total} matches found</p>
               </div>
+
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-purple-700 text-white">
-                        {['Requester', 'Phone', 'Age', 'Town', 'Matched With', 'Phone', 'Age', 'Town', 'Status', 'Time'].map(h => (
+                        {['Requester', 'Phone', 'Age', 'Town', 'Matched With', 'Phone', 'Age', 'Town', 'Status', 'Date'].map(h => (
                           <th key={h} className="px-4 py-4 text-left font-semibold text-xs uppercase tracking-wider whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
@@ -519,17 +584,20 @@ export default function Home() {
                           <td className="px-4 py-4 font-semibold text-gray-700">{match.matched_age}</td>
                           <td className="px-4 py-4 font-semibold text-gray-700 whitespace-nowrap">{match.matched_town}</td>
                           <td className="px-4 py-4">
-                            <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                              match.status === 'accepted' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
-                            }`}>{match.status}</span>
+                            <span className={`px-3 py-1 rounded-full text-xs font-bold ${match.status === 'accepted' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                              {match.status}
+                            </span>
                           </td>
-                          <td className="px-4 py-4 text-gray-400 text-xs whitespace-nowrap">{new Date(match.created_at).toLocaleString()}</td>
+                          <td className="px-4 py-4 text-gray-400 text-xs whitespace-nowrap">
+                            {new Date(match.created_at).toLocaleDateString()}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-                <Pagination page={matchesPage} totalPages={matchesMeta.total_pages} onPage={goMatchesPage} />
+                <Pagination page={matchesPage} totalPages={matchesMeta.total_pages}
+                  onPage={pg => { setMatchesPage(pg); fetchAll(token, { ...getCurrentFilters(), matchPage: pg }); }} />
               </div>
             </div>
           )}
